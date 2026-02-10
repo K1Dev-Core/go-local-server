@@ -1043,36 +1043,36 @@ func (a *App) createProjectCard(p *projects.Project) fyne.CanvasObject {
 	dbText := canvas.NewText(fmt.Sprintf("DB: %s@%s", p.Database.DBUser, p.Database.DBHost), color.NRGBA{100, 100, 100, 255})
 	dbText.TextSize = 10
 
-	openBtn := widget.NewButtonWithIcon("", theme.ComputerIcon(), func() {
+	openBtn := widget.NewButtonWithIcon("Open", theme.ComputerIcon(), func() {
 		exec.Command("open", url).Run()
 	})
 	openBtn.Importance = widget.HighImportance
 
-	phpmyadminBtn := widget.NewButtonWithIcon("", theme.FolderOpenIcon(), func() {
+	phpmyadminBtn := widget.NewButtonWithIcon("phpMyAdmin", theme.FolderOpenIcon(), func() {
 		exec.Command("open", "http://localhost:8081").Run()
 	})
 	phpmyadminBtn.Importance = widget.SuccessImportance
 
-	openFolderBtn := widget.NewButtonWithIcon("", theme.FolderIcon(), func() {
+	openFolderBtn := widget.NewButtonWithIcon("Folder", theme.FolderIcon(), func() {
 		if p.Path != "" {
 			exec.Command("open", p.Path).Run()
 		}
 	})
 
-	openVSCodeBtn := widget.NewButtonWithIcon("", theme.ComputerIcon(), func() {
+	openVSCodeBtn := widget.NewButtonWithIcon("VS Code", theme.ComputerIcon(), func() {
 		if p.Path != "" {
 			_ = exec.Command("open", "-a", "Visual Studio Code", p.Path).Run()
 		}
 	})
 
-	copyURLBtn := widget.NewButtonWithIcon("", theme.ContentCopyIcon(), func() {
+	copyURLBtn := widget.NewButtonWithIcon("Copy URL", theme.ContentCopyIcon(), func() {
 		if a.mainWindow != nil {
 			a.mainWindow.Clipboard().SetContent(url)
 			a.updateStatus("Copied URL")
 		}
 	})
 
-	copyDBBtn := widget.NewButtonWithIcon("", theme.ContentCopyIcon(), func() {
+	copyDBBtn := widget.NewButtonWithIcon("Copy DB", theme.ContentCopyIcon(), func() {
 		if p.Database.DBName == "" || p.Database.DBUser == "" {
 			return
 		}
@@ -1092,16 +1092,16 @@ func (a *App) createProjectCard(p *projects.Project) fyne.CanvasObject {
 		copyDBBtn.Hide()
 	}
 
-	editBtn := widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), func() {
+	editBtn := widget.NewButtonWithIcon("Edit", theme.DocumentCreateIcon(), func() {
 		a.showEditProjectDialog(p)
 	})
 
-	deleteBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
+	deleteBtn := widget.NewButtonWithIcon("Delete", theme.DeleteIcon(), func() {
 		a.deleteProject(p)
 	})
 	deleteBtn.Importance = widget.DangerImportance
 
-	fixDBBtn := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
+	fixDBBtn := widget.NewButtonWithIcon("Fix DB", theme.ViewRefreshIcon(), func() {
 		a.fixProjectDatabase(p)
 	})
 	fixDBBtn.Importance = widget.MediumImportance
