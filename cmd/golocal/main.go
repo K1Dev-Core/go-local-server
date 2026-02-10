@@ -1478,32 +1478,64 @@ func (a *App) showProjectDialog(existing *projects.Project, prefillName, prefill
 	}
 
 	// Domain preview label
-	domainPreview := widget.NewLabel(fmt.Sprintf("Domain will be: <subdomain>.%s", a.config.Domain))
-	domainPreview.TextStyle = fyne.TextStyle{Italic: true}
+	domainPreview := canvas.NewText(fmt.Sprintf("→ %s.<domain>", a.config.Domain), color.NRGBA{120, 180, 255, 255})
+	domainPreview.TextSize = 11
 
-	// Build form content with larger size
-	projectFormItems := []*widget.FormItem{
-		widget.NewFormItem("Project Name", nameEntry),
-		widget.NewFormItem("Subdomain", container.NewVBox(subdomainEntry, domainPreview)),
-		widget.NewFormItem("Project Path", pathRow),
-		widget.NewFormItem("PHP Version", phpVersion),
-		widget.NewFormItem("DocumentRoot", docRootEntry),
+	// Helper labels
+	docRootHint := canvas.NewText("Folder containing index.php (e.g: public, dist, www)", color.NRGBA{150, 150, 150, 255})
+	docRootHint.TextSize = 10
+
+	// Section 1: Basic Info Card
+	basicSection := container.NewVBox(
+		canvas.NewText("1. Basic Info", color.NRGBA{255, 255, 255, 255}),
+		widget.NewForm(
+			widget.NewFormItem("Name", nameEntry),
+			widget.NewFormItem("Subdomain", container.NewVBox(subdomainEntry, domainPreview)),
+			widget.NewFormItem("Path", pathRow),
+		),
+	)
+
+	// Section 2: Web Server Card
+	webSectionItems := []*widget.FormItem{
+		widget.NewFormItem("PHP", phpVersion),
+		widget.NewFormItem("DocumentRoot", container.NewVBox(docRootEntry, docRootHint)),
 	}
 	if !isImport {
-		projectFormItems = append(projectFormItems, widget.NewFormItem("Template", templateType))
+		webSectionItems = append(webSectionItems, widget.NewFormItem("Template", templateType))
 	}
+	webSection := container.NewVBox(
+		canvas.NewText("2. Web Server", color.NRGBA{255, 255, 255, 255}),
+		widget.NewForm(webSectionItems...),
+	)
 
-	formContent := container.NewVBox(
-		widget.NewForm(projectFormItems...),
-		widget.NewSeparator(),
-		widget.NewLabel("Database Configuration"),
+	// Section 3: Database Card
+	dbSection := container.NewVBox(
+		canvas.NewText("3. Database (Optional)", color.NRGBA{255, 255, 255, 255}),
 		useMySQL,
 		widget.NewForm(
 			widget.NewFormItem("DB Name", dbName),
 			widget.NewFormItem("DB User", dbUser),
-			widget.NewFormItem("DB Password", dbPass),
+			widget.NewFormItem("Password", dbPass),
 		),
-		genTemplate,
+	)
+
+	// Template option
+	templateSection := container.NewVBox()
+	if !isImport {
+		templateSection = container.NewVBox(
+			widget.NewSeparator(),
+			genTemplate,
+		)
+	}
+
+	// Build main content with cards
+	formContent := container.NewVBox(
+		container.NewPadded(basicSection),
+		widget.NewSeparator(),
+		container.NewPadded(webSection),
+		widget.NewSeparator(),
+		container.NewPadded(dbSection),
+		templateSection,
 	)
 
 	// Resize the form content for larger dialog
