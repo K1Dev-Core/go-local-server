@@ -44,7 +44,12 @@ func NewGenerator(cfg *config.AppConfig) *Generator {
 
 func (g *Generator) GenerateVhost(project *projects.Project) error {
 	docRoot := project.Path
-	if _, err := os.Stat(filepath.Join(project.Path, "public", "index.php")); err == nil {
+
+	// Use custom DocumentRoot if set
+	if project.DocumentRoot != "" {
+		docRoot = filepath.Join(project.Path, project.DocumentRoot)
+	} else if _, err := os.Stat(filepath.Join(project.Path, "public", "index.php")); err == nil {
+		// Auto-detect MVC public folder
 		docRoot = filepath.Join(project.Path, "public")
 	}
 

@@ -1415,6 +1415,13 @@ func (a *App) showProjectDialog(existing *projects.Project, prefillName, prefill
 	phpVersion := widget.NewSelect([]string{"8.3", "8.2", "8.1", "8.0", "7.4"}, nil)
 	phpVersion.SetSelected("8.3")
 
+	// DocumentRoot input for custom subfolder
+	docRootEntry := widget.NewEntry()
+	docRootEntry.SetPlaceHolder("Leave empty for auto (public/ or root)")
+	if isEdit && existing.DocumentRoot != "" {
+		docRootEntry.SetText(existing.DocumentRoot)
+	}
+
 	// Template selection is only for new projects. For imports we auto-detect.
 	templateType := widget.NewSelect([]string{"Simple", "MVC"}, nil)
 	templateType.SetSelected("Simple")
@@ -1480,6 +1487,7 @@ func (a *App) showProjectDialog(existing *projects.Project, prefillName, prefill
 		widget.NewFormItem("Subdomain", container.NewVBox(subdomainEntry, domainPreview)),
 		widget.NewFormItem("Project Path", pathRow),
 		widget.NewFormItem("PHP Version", phpVersion),
+		widget.NewFormItem("DocumentRoot", docRootEntry),
 	}
 	if !isImport {
 		projectFormItems = append(projectFormItems, widget.NewFormItem("Template", templateType))
@@ -1575,10 +1583,15 @@ func (a *App) showProjectDialog(existing *projects.Project, prefillName, prefill
 			existing.Domain = domain
 			existing.PHPVersion = phpVersion.Selected
 			existing.Database = dbConfig
+			existing.DocumentRoot = strings.TrimSpace(docRootEntry.Text)
 			err = a.projectManager.Update(existing)
 			p = existing
 		} else {
 			p, err = a.projectManager.CreateWithSubdomain(nameEntry.Text, subdomain, selectedPath, phpVersion.Selected, dbConfig)
+			if p != nil {
+				p.DocumentRoot = strings.TrimSpace(docRootEntry.Text)
+				a.projectManager.Update(p)
+			}
 		}
 
 		if err != nil {

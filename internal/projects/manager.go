@@ -26,6 +26,7 @@ type Project struct {
 	Name           string         `json:"name"`
 	Domain         string         `json:"domain"`
 	Path           string         `json:"path"`
+	DocumentRoot   string         `json:"document_root"`
 	PHPVersion     string         `json:"php_version"`
 	Database       DatabaseConfig `json:"database"`
 	HasPHPMyAdmin  bool           `json:"has_phpmyadmin"`
