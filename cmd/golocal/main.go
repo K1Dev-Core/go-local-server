@@ -347,6 +347,7 @@ type App struct {
 	config         *config.AppConfig
 	usingDocker    bool
 	composeFile    string
+	stopRefreshCh  chan struct{}
 	busy           bool
 	busyPrevText   map[*widget.Button]string
 	quickStartBtn  *widget.Button
@@ -394,6 +395,7 @@ func main() {
 		serviceManager: nil, // Will be set below
 		projectManager: projects.NewManager(cfg),
 		dnsServer:      dns.NewServer(cfg),
+		stopRefreshCh:  make(chan struct{}),
 	}
 
 	composeFile, err := findDockerComposeFile()
@@ -440,10 +442,37 @@ func (a *App) showDockerWarning() {
 	// Wait a moment for window to be fully shown
 	time.Sleep(500 * time.Millisecond)
 
+	dockerInstalled := findDockerBinary() != "docker"
+	dockerRunning := services.CheckDockerAvailable()
+	composeOK := a.composeFile != ""
+	if composeOK {
+		if st, err := os.Stat(a.composeFile); err != nil || st.IsDir() {
+			composeOK = false
+		}
+	}
+
 	info := widget.NewLabel(
 		"Docker is not running or not installed.\n\n" +
 			"If you want the app to manage services via Docker (recommended), start Docker Desktop and then run Docker Compose.\n\n" +
 			"Current mode: Local binaries",
+	)
+
+	statusLine := func(label string, ok bool) fyne.CanvasObject {
+		col := color.NRGBA{200, 80, 80, 255}
+		val := "NO"
+		if ok {
+			col = color.NRGBA{80, 200, 120, 255}
+			val = "YES"
+		}
+		l := canvas.NewText(fmt.Sprintf("%s: %s", label, val), col)
+		l.TextSize = 12
+		return l
+	}
+
+	statuses := container.NewVBox(
+		statusLine("Docker Installed", dockerInstalled),
+		statusLine("Docker Running", dockerRunning),
+		statusLine("Compose File Found", composeOK),
 	)
 
 	openDockerBtn := widget.NewButtonWithIcon("Open Docker Desktop", theme.ComputerIcon(), func() {
@@ -462,6 +491,20 @@ func (a *App) showDockerWarning() {
 		a.runDockerComposeWithLogs()
 	})
 
+	resetStackBtn := widget.NewButtonWithIcon("Reset Stack (down -v)", theme.DeleteIcon(), func() {
+		if a.composeFile == "" {
+			a.showError("Docker Compose", fmt.Errorf("docker-compose.yml not found"))
+			return
+		}
+		dialog.ShowConfirm("Reset Stack", "This will stop containers and remove volumes (MySQL data will be deleted). Continue?", func(ok bool) {
+			if !ok {
+				return
+			}
+			a.runDockerComposeCommandWithLogs("Docker Compose Down (volumes)", "down", "-v")
+		}, a.mainWindow)
+	})
+	resetStackBtn.Importance = widget.DangerImportance
+
 	refreshBtn := widget.NewButtonWithIcon("Re-check Docker", theme.ViewRefreshIcon(), func() {
 		if services.CheckDockerAvailable() {
 			a.serviceManager = services.NewDockerServiceManager(a.config)
@@ -471,7 +514,17 @@ func (a *App) showDockerWarning() {
 		dialog.ShowInformation("Docker", "Docker is still not available. Please wait for Docker Desktop to fully start.", a.mainWindow)
 	})
 
-	content := container.NewVBox(info, widget.NewSeparator(), openDockerBtn, downloadDockerBtn, runComposeBtn, refreshBtn)
+	content := container.NewVBox(
+		info,
+		widget.NewSeparator(),
+		statuses,
+		widget.NewSeparator(),
+		openDockerBtn,
+		downloadDockerBtn,
+		runComposeBtn,
+		resetStackBtn,
+		refreshBtn,
+	)
 	content.Resize(fyne.NewSize(520, 260))
 
 	dlg := dialog.NewCustom("Docker Setup", "Close", content, a.mainWindow)
@@ -483,7 +536,7 @@ func (a *App) setupMainWindow() {
 	a.mainWindow = a.fyneApp.NewWindow("Go Local Server")
 	a.mainWindow.Resize(fyne.NewSize(1100, 750))
 	a.mainWindow.SetCloseIntercept(func() {
-		a.mainWindow.Hide()
+		a.shutdown()
 	})
 
 	a.createSidebar()
@@ -520,6 +573,24 @@ func (a *App) setupMainWindow() {
 	))
 
 	go a.refreshLoop()
+}
+
+func (a *App) shutdown() {
+	select {
+	case <-a.stopRefreshCh:
+		// already closed
+	default:
+		close(a.stopRefreshCh)
+	}
+
+	// Best-effort cleanup
+	if a.dnsServer != nil {
+		a.dnsServer.Stop()
+	}
+
+	if a.fyneApp != nil {
+		a.fyneApp.Quit()
+	}
 }
 
 func (a *App) withLoading(title string, fn func() error) {
@@ -982,6 +1053,45 @@ func (a *App) createProjectCard(p *projects.Project) fyne.CanvasObject {
 	})
 	phpmyadminBtn.Importance = widget.SuccessImportance
 
+	openFolderBtn := widget.NewButtonWithIcon("", theme.FolderIcon(), func() {
+		if p.Path != "" {
+			exec.Command("open", p.Path).Run()
+		}
+	})
+
+	openVSCodeBtn := widget.NewButtonWithIcon("", theme.ComputerIcon(), func() {
+		if p.Path != "" {
+			_ = exec.Command("open", "-a", "Visual Studio Code", p.Path).Run()
+		}
+	})
+
+	copyURLBtn := widget.NewButtonWithIcon("", theme.ContentCopyIcon(), func() {
+		if a.mainWindow != nil {
+			a.mainWindow.Clipboard().SetContent(url)
+			a.updateStatus("Copied URL")
+		}
+	})
+
+	copyDBBtn := widget.NewButtonWithIcon("", theme.ContentCopyIcon(), func() {
+		if p.Database.DBName == "" || p.Database.DBUser == "" {
+			return
+		}
+		creds := fmt.Sprintf("DB Name: %s\nUser: %s\nPassword: %s\nHost: %s\nPort: %d",
+			p.Database.DBName,
+			p.Database.DBUser,
+			p.Database.DBPassword,
+			p.Database.DBHost,
+			p.Database.DBPort,
+		)
+		if a.mainWindow != nil {
+			a.mainWindow.Clipboard().SetContent(creds)
+			a.updateStatus("Copied DB credentials")
+		}
+	})
+	if p.Database.DBName == "" || p.Database.DBUser == "" {
+		copyDBBtn.Hide()
+	}
+
 	editBtn := widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), func() {
 		a.showEditProjectDialog(p)
 	})
@@ -1005,7 +1115,7 @@ func (a *App) createProjectCard(p *projects.Project) fyne.CanvasObject {
 			container.NewVBox(title, urlText, phpText, dbText),
 			nil,
 			nil,
-			container.NewHBox(openBtn, phpmyadminBtn, fixDBBtn, editBtn, deleteBtn),
+			container.NewHBox(openBtn, phpmyadminBtn, openFolderBtn, openVSCodeBtn, copyURLBtn, copyDBBtn, fixDBBtn, editBtn, deleteBtn),
 		)),
 	)
 }
@@ -1125,10 +1235,16 @@ func (a *App) stopService(name string) {
 
 func (a *App) refreshLoop() {
 	ticker := time.NewTicker(2 * time.Second)
-	for range ticker.C {
-		a.serviceManager.RefreshStatuses()
-		a.updateServiceCards()
-		a.updateQuickActionButtons()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			a.serviceManager.RefreshStatuses()
+			a.updateServiceCards()
+			a.updateQuickActionButtons()
+		case <-a.stopRefreshCh:
+			return
+		}
 	}
 }
 

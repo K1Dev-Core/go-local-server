@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -90,6 +91,15 @@ func (dsm *DockerServiceManager) dockerCompose(args ...string) *exec.Cmd {
 	return cmd
 }
 
+func (dsm *DockerServiceManager) dockerComposeWithTimeout(timeout time.Duration, args ...string) *exec.Cmd {
+	dockerPath := findDockerBinary()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	_ = cancel
+	cmd := exec.CommandContext(ctx, dockerPath, append([]string{"compose", "-f", dsm.composeFile}, args...)...)
+	cmd.Dir = filepath.Dir(dsm.composeFile)
+	return cmd
+}
+
 func (dsm *DockerServiceManager) StartNginx() error {
 	svc := dsm.Services["nginx"]
 	if svc.Status == StatusRunning {
@@ -162,7 +172,7 @@ func (dsm *DockerServiceManager) ReloadNginx() error {
 }
 
 func (dsm *DockerServiceManager) CheckNginxStatus() error {
-	cmd := dsm.dockerCompose("ps", "apache", "--format", "{{.Status}}")
+	cmd := dsm.dockerComposeWithTimeout(2*time.Second, "ps", "apache", "--format", "{{.Status}}")
 	output, err := cmd.Output()
 	if err != nil {
 		dsm.Services["nginx"].Status = StatusStopped
@@ -250,7 +260,7 @@ func (dsm *DockerServiceManager) StopMySQL() error {
 }
 
 func (dsm *DockerServiceManager) CheckMySQLStatus() error {
-	cmd := dsm.dockerCompose("ps", "mysql", "--format", "{{.Status}}")
+	cmd := dsm.dockerComposeWithTimeout(2*time.Second, "ps", "mysql", "--format", "{{.Status}}")
 	output, err := cmd.Output()
 	if err != nil {
 		dsm.Services["mysql"].Status = StatusStopped
@@ -309,7 +319,7 @@ func (dsm *DockerServiceManager) CreateDatabase(dbName, dbUser, dbPassword strin
 
 func (dsm *DockerServiceManager) StartAll() error {
 	// Start all services with docker-compose up -d
-	cmd := dsm.dockerCompose("up", "-d")
+	cmd := dsm.dockerComposeWithTimeout(30*time.Second, "up", "-d")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to start services: %v\n%s", err, output)
@@ -352,7 +362,11 @@ func (dsm *DockerServiceManager) GetServices() map[string]*Service {
 // CheckDockerAvailable verifies Docker is installed and running
 func CheckDockerAvailable() bool {
 	dockerPath := findDockerBinary()
-	cmd := exec.Command(dockerPath, "version")
-	err := cmd.Run()
-	return err == nil
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, dockerPath, "version")
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return true
 }
