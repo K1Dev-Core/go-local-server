@@ -401,11 +401,30 @@ func injectIntoHTML(filename string, src string, script string, marker string) (
 
 	// PHP-safe fallback:
 	// If this is a PHP entry file, it's common to not have </body> or even a closing ?>.
-	// Appending raw HTML while still in PHP mode would break the page, so we close PHP
-	// context explicitly via a marker block then add the script.
+	// We need to ensure we're in HTML context before injecting the script, otherwise
+	// we'll create nested PHP tags which causes parse errors.
 	if strings.EqualFold(filepath.Ext(filename), ".php") {
-		phpMarker := fmt.Sprintf("\n<?php /* %s */ ?>\n", marker)
-		return src + phpMarker + script + "\n", true
+		trimmed := strings.TrimSpace(src)
+		
+		// Check if file ends with an open PHP block (no closing ?>)
+		// In this case we need to close PHP first, then inject script
+		endsInPHPMode := false
+		lastClose := strings.LastIndex(trimmed, "?>")
+		lastOpen := strings.LastIndex(trimmed, "<?")
+		
+		if lastOpen > lastClose {
+			// Last thing is <?php or <? - we're in PHP mode
+			endsInPHPMode = true
+		}
+		
+		if endsInPHPMode {
+			// Close PHP context first, then inject script in HTML context
+			phpMarker := fmt.Sprintf("\n\n/* %s */\n?>\n", marker)
+			return src + phpMarker + script + "\n", true
+		}
+		
+		// If not in PHP mode, or file ends properly with ?>, just append the script
+		return src + "\n" + script + "\n", true
 	}
 
 	// Otherwise don't touch unknown files
