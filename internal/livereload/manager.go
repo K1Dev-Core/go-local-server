@@ -343,6 +343,21 @@ func (m *Manager) TryInjectScript(p *projects.Project) error {
 		filepath.Join(p.Path, "index.html"),
 	)
 
+	// If we can't find a common entry file, best-effort scan for an index file.
+	// Many existing projects use custom document roots (e.g. htdocs/, web/, src/).
+	foundExistingCandidate := false
+	for _, f := range entryCandidates {
+		if _, err := os.Stat(f); err == nil {
+			foundExistingCandidate = true
+			break
+		}
+	}
+	if !foundExistingCandidate {
+		if found := findIndexFiles(p.Path, 3); len(found) > 0 {
+			entryCandidates = append(entryCandidates, found...)
+		}
+	}
+
 	script := m.ClientScript(p.ID)
 	marker := "GoLocal LiveReload"
 	for _, f := range entryCandidates {
@@ -354,7 +369,7 @@ func (m *Manager) TryInjectScript(p *projects.Project) error {
 			return nil
 		}
 
-		updated, ok := injectIntoHTML(string(data), script, marker)
+		updated, ok := injectIntoHTML(f, string(data), script, marker)
 		if !ok {
 			continue
 		}
@@ -369,7 +384,7 @@ func (m *Manager) TryInjectScript(p *projects.Project) error {
 	return nil
 }
 
-func injectIntoHTML(src string, script string, marker string) (string, bool) {
+func injectIntoHTML(filename string, src string, script string, marker string) (string, bool) {
 	// Add marker comment to avoid duplicates
 	injectBlock := fmt.Sprintf("\n<!-- %s -->\n%s\n", marker, script)
 
@@ -384,14 +399,55 @@ func injectIntoHTML(src string, script string, marker string) (string, bool) {
 		return src + injectBlock, true
 	}
 
-	// As a fallback, if file is php and contains closing tag, append after it
-	trim := strings.TrimSpace(src)
-	if strings.HasSuffix(trim, "?>") {
-		return src + injectBlock, true
+	// PHP-safe fallback:
+	// If this is a PHP entry file, it's common to not have </body> or even a closing ?>.
+	// Appending raw HTML while still in PHP mode would break the page, so we close PHP
+	// context explicitly via a marker block then add the script.
+	if strings.EqualFold(filepath.Ext(filename), ".php") {
+		phpMarker := fmt.Sprintf("\n<?php /* %s */ ?>\n", marker)
+		return src + phpMarker + script + "\n", true
 	}
 
 	// Otherwise don't touch unknown files
 	return src, false
+}
+
+func findIndexFiles(root string, maxDepth int) []string {
+	var results []string
+	rootClean := filepath.Clean(root)
+	rootDepth := strings.Count(rootClean, string(os.PathSeparator))
+
+	_ = filepath.WalkDir(rootClean, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if isIgnoredPath(path) {
+				return filepath.SkipDir
+			}
+			depth := strings.Count(filepath.Clean(path), string(os.PathSeparator)) - rootDepth
+			if maxDepth > 0 && depth > maxDepth {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		name := strings.ToLower(d.Name())
+		if name != "index.php" && name != "index.html" {
+			return nil
+		}
+		if isIgnoredPath(path) {
+			return nil
+		}
+		results = append(results, path)
+		// Cap to avoid scanning too many candidates
+		if len(results) >= 20 {
+			return fsnotify.ErrEventOverflow
+		}
+		return nil
+	})
+
+	return results
 }
 
 // TailFile streams last N lines from a file (utility for future use).
