@@ -157,6 +157,19 @@ func (m *Manager) ClientScript(projectID string) string {
 }
 
 func (m *Manager) handleEvents(w http.ResponseWriter, r *http.Request) {
+	// Allow EventSource from project domains (e.g. http://myproject.test)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	projectID := r.URL.Query().Get("project")
 	if projectID == "" {
 		http.Error(w, "missing project", http.StatusBadRequest)
