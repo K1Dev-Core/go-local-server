@@ -595,12 +595,57 @@ func (a *App) shutdown() {
 
 func (a *App) withLoading(title string, fn func() error) {
 	a.setBusy(true)
-	progress := dialog.NewProgressInfinite(title, "Please wait...", a.mainWindow)
-	progress.Show()
+	
+	// Create custom loading dialog with better UI
+	loadingTitle := canvas.NewText(title, color.White)
+	loadingTitle.TextSize = 16
+	loadingTitle.TextStyle = fyne.TextStyle{Bold: true}
+	
+	loadingDesc := canvas.NewText("Please wait...", color.NRGBA{150, 150, 150, 255})
+	loadingDesc.TextSize = 12
+	
+	// Animated dots
+	dots := canvas.NewText("● ○ ○", color.NRGBA{100, 180, 255, 255})
+	dots.TextSize = 14
+	
+	content := container.NewVBox(
+		container.NewCenter(container.NewVBox(
+			loadingTitle,
+			widget.NewSeparator(),
+			dots,
+			loadingDesc,
+		)),
+	)
+	content.Resize(fyne.NewSize(280, 100))
+	
+	loadingDlg := dialog.NewCustomWithoutButtons("", content, a.mainWindow)
+	loadingDlg.Resize(fyne.NewSize(300, 120))
+	
+	// Animation for dots
+	stopAnim := make(chan bool)
+	go func() {
+		frames := []string{"● ○ ○", "○ ● ○", "○ ○ ●", "○ ● ○"}
+		i := 0
+		ticker := time.NewTicker(300 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				dots.Text = frames[i%len(frames)]
+				dots.Refresh()
+				i++
+			case <-stopAnim:
+				return
+			}
+		}
+	}()
+	
+	loadingDlg.Show()
 
 	go func() {
 		err := fn()
-		progress.Hide()
+		close(stopAnim)
+		loadingDlg.Hide()
 		if err != nil {
 			a.showError(title, err)
 		}
@@ -1250,14 +1295,19 @@ func (a *App) stopService(name string) {
 }
 
 func (a *App) refreshLoop() {
-	ticker := time.NewTicker(2 * time.Second)
+	// Use a slower ticker (3 seconds) to reduce CPU usage and make UI feel smoother
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
+	
 	for {
 		select {
 		case <-ticker.C:
-			a.serviceManager.RefreshStatuses()
-			a.updateServiceCards()
-			a.updateQuickActionButtons()
+			// Use goroutine to prevent blocking UI thread
+			go func() {
+				a.serviceManager.RefreshStatuses()
+				a.updateServiceCards()
+				a.updateQuickActionButtons()
+			}()
 		case <-a.stopRefreshCh:
 			return
 		}
