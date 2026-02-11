@@ -1003,6 +1003,10 @@ func (a *App) showSettings() {
 	dbTitle.TextSize = 16
 	dbTitle.TextStyle = fyne.TextStyle{Bold: true}
 
+	editorTitle := canvas.NewText("Editor Settings", color.White)
+	editorTitle.TextSize = 16
+	editorTitle.TextStyle = fyne.TextStyle{Bold: true}
+
 	dbInfo := canvas.NewText("Host: mysql  |  Port (inside Docker): 3306", color.NRGBA{120, 120, 120, 255})
 	dbInfo.TextSize = 11
 
@@ -1013,6 +1017,12 @@ func (a *App) showSettings() {
 	domain := widget.NewEntry()
 	domain.SetText(a.config.Domain)
 
+	editorSelector := widget.NewSelect([]string{"VSCode", "Cursor", "Windsurf"}, nil)
+	editorSelector.SetSelected(a.config.PreferredEditor)
+	if editorSelector.Selected == "" {
+		editorSelector.SetSelected("VSCode")
+	}
+
 	saveBtn := widget.NewButtonWithIcon("Save Settings", theme.DocumentSaveIcon(), func() {
 		if p, err := strconv.Atoi(httpPort.Text); err == nil {
 			a.config.HTTPPort = p
@@ -1021,6 +1031,7 @@ func (a *App) showSettings() {
 			a.config.MySQLPort = p
 		}
 		a.config.Domain = domain.Text
+		a.config.PreferredEditor = editorSelector.Selected
 		a.config.Save()
 		a.updateStatus("Settings saved")
 	})
@@ -1034,6 +1045,11 @@ func (a *App) showSettings() {
 			widget.NewFormItem("HTTP Port", httpPort),
 			widget.NewFormItem("MySQL Port", mysqlPort),
 			widget.NewFormItem("Domain", domain),
+		)),
+		widget.NewSeparator(),
+		container.NewPadded(editorTitle),
+		container.NewPadded(widget.NewForm(
+			widget.NewFormItem("Preferred Editor", editorSelector),
 		)),
 		widget.NewSeparator(),
 		container.NewPadded(dbTitle),
@@ -1146,9 +1162,10 @@ func (a *App) createProjectCard(p *projects.Project) fyne.CanvasObject {
 		}
 	})
 
-	openVSCodeBtn := widget.NewButtonWithIcon("VS Code", theme.ComputerIcon(), func() {
+	appName, displayName := a.config.GetEditorInfo()
+	openEditorBtn := widget.NewButtonWithIcon(displayName, theme.ComputerIcon(), func() {
 		if p.Path != "" {
-			_ = exec.Command("open", "-a", "Visual Studio Code", p.Path).Run()
+			_ = exec.Command("open", "-a", appName, p.Path).Run()
 		}
 	})
 
@@ -1207,7 +1224,7 @@ func (a *App) createProjectCard(p *projects.Project) fyne.CanvasObject {
 	actionsBtn := widget.NewButtonWithIcon("Actions", theme.MenuIcon(), func() {
 		content := container.NewGridWithColumns(2,
 			phpmyadminBtn,
-			openVSCodeBtn,
+			openEditorBtn,
 			copyURLBtn,
 			copyDBBtn,
 			fixDBBtn,
