@@ -27,6 +27,7 @@ type Project struct {
 	Domain         string         `json:"domain"`
 	Path           string         `json:"path"`
 	DocumentRoot   string         `json:"document_root"`
+	LiveReloadEnabled bool        `json:"live_reload_enabled"`
 	PHPVersion     string         `json:"php_version"`
 	Database       DatabaseConfig `json:"database"`
 	HasPHPMyAdmin  bool           `json:"has_phpmyadmin"`
