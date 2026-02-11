@@ -259,7 +259,7 @@ func (m *Manager) watchLoop(projectID string, st *projectState) {
 		if st.debounce != nil {
 			st.debounce.Stop()
 		}
-		st.debounce = time.AfterFunc(250*time.Millisecond, trigger)
+		st.debounce = time.AfterFunc(800*time.Millisecond, trigger)
 	}
 
 	for {
@@ -275,9 +275,21 @@ func (m *Manager) watchLoop(projectID string, st *projectState) {
 				}
 			}
 
+			// Skip ignored paths
 			if isIgnoredPath(ev.Name) {
 				continue
 			}
+			
+			// Skip temp/swap files
+			if isTempFile(ev.Name) {
+				continue
+			}
+			
+			// Only watch specific file extensions
+			if !isWatchedExtension(ev.Name) {
+				continue
+			}
+			
 			// Only trigger on write/create/remove/rename
 			if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Remove|fsnotify.Rename) != 0 {
 				debounced()
@@ -307,9 +319,47 @@ func addWatchRecursive(w *fsnotify.Watcher, root string) error {
 
 func isIgnoredPath(path string) bool {
 	p := strings.ToLower(path)
-	ignored := []string{"/.git/", "/node_modules/", "/vendor/", "/.idea/", "/.vscode/", "/storage/", "/dist/", "/bin/"}
+	ignored := []string{
+		"/.git/", "/node_modules/", "/vendor/", "/.idea/", "/.vscode/",
+		"/storage/", "/dist/", "/bin/", "/.cache/", "/tmp/",
+		"/logs/", "/.DS_Store", "/Thumbs.db",
+	}
 	for _, ig := range ignored {
 		if strings.Contains(p, ig) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTempFile(path string) bool {
+	p := strings.ToLower(path)
+	// Common temp file patterns
+	tempPatterns := []string{
+		".swp", ".swo", ".swn", ".swm", // vim swap files
+		"~", ".tmp", ".temp", ".bak", ".backup",
+		".sass-cache", ".eslintcache", ".cache-loader",
+		".log", ".pid", ".seed", ".pid.lock",
+	}
+	for _, pattern := range tempPatterns {
+		if strings.HasSuffix(p, pattern) || strings.Contains(p, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func isWatchedExtension(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	// Only watch web development files
+	watched := []string{
+		".php", ".html", ".htm", ".js", ".jsx", ".ts", ".tsx",
+		".css", ".scss", ".sass", ".less", ".json", ".xml",
+		".vue", ".svelte", ".twig", ".blade.php", ".phtml",
+		".md", ".markdown", ".yaml", ".yml",
+	}
+	for _, w := range watched {
+		if ext == w || strings.HasSuffix(strings.ToLower(path), w) {
 			return true
 		}
 	}
