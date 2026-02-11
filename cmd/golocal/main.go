@@ -604,9 +604,9 @@ func (a *App) withLoading(title string, fn func() error) {
 	loadingDesc := canvas.NewText("Please wait...", color.NRGBA{150, 150, 150, 255})
 	loadingDesc.TextSize = 12
 	
-	// Animated dots
-	dots := canvas.NewText("● ○ ○", color.NRGBA{100, 180, 255, 255})
-	dots.TextSize = 14
+	// Animated dots using simple ASCII characters
+	dots := canvas.NewText(".  ", color.NRGBA{100, 180, 255, 255})
+	dots.TextSize = 20
 	
 	content := container.NewVBox(
 		container.NewCenter(container.NewVBox(
@@ -621,12 +621,12 @@ func (a *App) withLoading(title string, fn func() error) {
 	loadingDlg := dialog.NewCustomWithoutButtons("", content, a.mainWindow)
 	loadingDlg.Resize(fyne.NewSize(300, 120))
 	
-	// Animation for dots
+	// Animation for dots - use simple ASCII
 	stopAnim := make(chan bool)
 	go func() {
-		frames := []string{"● ○ ○", "○ ● ○", "○ ○ ●", "○ ● ○"}
+		frames := []string{".  ", ".. ", "...", " ..", "  .", " .."}
 		i := 0
-		ticker := time.NewTicker(300 * time.Millisecond)
+		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {
@@ -1544,7 +1544,7 @@ func (a *App) showProjectDialog(existing *projects.Project, prefillName, prefill
 	}
 
 	// Domain preview label
-	domainPreview := canvas.NewText(fmt.Sprintf("→ %s.<domain>", a.config.Domain), color.NRGBA{120, 180, 255, 255})
+	domainPreview := canvas.NewText(fmt.Sprintf("-> %s.<domain>", a.config.Domain), color.NRGBA{120, 180, 255, 255})
 	domainPreview.TextSize = 11
 
 	// Helper labels
@@ -1905,7 +1905,7 @@ func (a *App) showHealthCheckDashboard() {
 		case "running":
 			indicatorColor = color.NRGBA{100, 200, 100, 255} // Green
 			if health == "healthy" {
-				statusText = "✓ Ready"
+				statusText = "[OK] Ready"
 			} else if health == "unknown" {
 				statusText = "Running (no health check)"
 			} else {
@@ -1913,7 +1913,7 @@ func (a *App) showHealthCheckDashboard() {
 			}
 		case "stopped":
 			indicatorColor = color.NRGBA{200, 100, 100, 255} // Red
-			statusText = "✗ Stopped"
+			statusText = "[X] Stopped"
 		default:
 			indicatorColor = color.NRGBA{150, 150, 150, 255} // Gray
 			statusText = "Unknown"
