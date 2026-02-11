@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -369,4 +370,139 @@ func CheckDockerAvailable() bool {
 		return false
 	}
 	return true
+}
+
+// IsDockerDesktopInstalled checks if Docker Desktop app exists
+func IsDockerDesktopInstalled() bool {
+	_, err := os.Stat("/Applications/Docker.app")
+	return err == nil
+}
+
+// StartDockerDesktop launches Docker Desktop application
+func StartDockerDesktop() error {
+	if !IsDockerDesktopInstalled() {
+		return fmt.Errorf("Docker Desktop not found in /Applications")
+	}
+	cmd := exec.Command("open", "-a", "Docker")
+	return cmd.Run()
+}
+
+// EnsureDockerRunning checks Docker and auto-starts Docker Desktop if needed
+func EnsureDockerRunning() error {
+	if CheckDockerAvailable() {
+		return nil
+	}
+	if !IsDockerDesktopInstalled() {
+		return fmt.Errorf("Docker Desktop not installed")
+	}
+	// Try to start Docker Desktop
+	if err := StartDockerDesktop(); err != nil {
+		return fmt.Errorf("failed to start Docker Desktop: %w", err)
+	}
+	return nil
+}
+
+// StreamContainerLogs returns a channel for streaming container logs
+func (dsm *DockerServiceManager) StreamContainerLogs(containerName string, follow bool) (chan string, error) {
+	outputChan := make(chan string, 100)
+	
+	args := []string{"compose", "-f", dsm.composeFile, "logs"}
+	if follow {
+		args = append(args, "-f")
+	}
+	args = append(args, containerName)
+	
+	dockerPath := findDockerBinary()
+	cmd := exec.Command(dockerPath, args...)
+	cmd.Dir = filepath.Dir(dsm.composeFile)
+	
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		close(outputChan)
+		return outputChan, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		close(outputChan)
+		return outputChan, err
+	}
+	
+	if err := cmd.Start(); err != nil {
+		close(outputChan)
+		return outputChan, err
+	}
+	
+	go func() {
+		defer close(outputChan)
+		
+		// Read stdout
+		go func() {
+			scanner := bufio.NewScanner(stdout)
+			for scanner.Scan() {
+				outputChan <- scanner.Text()
+			}
+		}()
+		
+		// Read stderr
+		go func() {
+			scanner := bufio.NewScanner(stderr)
+			for scanner.Scan() {
+				outputChan <- scanner.Text()
+			}
+		}()
+		
+		cmd.Wait()
+	}()
+	
+	return outputChan, nil
+}
+
+// GetServiceHealth returns detailed health status for a service
+func (dsm *DockerServiceManager) GetServiceHealth(serviceName string) (status string, health string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	
+	dockerPath := findDockerBinary()
+	
+	// Get container status
+	cmd := exec.CommandContext(ctx, dockerPath, "compose", "-f", dsm.composeFile, "ps", serviceName, "--format", "{{.Status}}")
+	output, err := cmd.Output()
+	if err != nil {
+		return "stopped", "unhealthy", err
+	}
+	
+	statusStr := strings.TrimSpace(string(output))
+	if !strings.Contains(statusStr, "Up") {
+		return "stopped", "unhealthy", nil
+	}
+	
+	// Check if healthcheck is available
+	cmd = exec.CommandContext(ctx, dockerPath, "inspect", "--format", "{{.State.Health.Status}}", serviceName)
+	healthOutput, err := cmd.Output()
+	if err != nil {
+		return "running", "unknown", nil
+	}
+	
+	healthStr := strings.TrimSpace(string(healthOutput))
+	if healthStr == "" || healthStr == "<no value>" {
+		return "running", "unknown", nil
+	}
+	
+	return "running", healthStr, nil
+}
+
+// GetAllHealthStatus returns health status for all services
+func (dsm *DockerServiceManager) GetAllHealthStatus() map[string]map[string]string {
+	result := make(map[string]map[string]string)
+	
+	services := []string{"apache", "mysql", "phpmyadmin"}
+	for _, svc := range services {
+		status, health, _ := dsm.GetServiceHealth(svc)
+		result[svc] = map[string]string{
+			"status": status,
+			"health": health,
+		}
+	}
+	
+	return result
 }

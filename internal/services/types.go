@@ -24,6 +24,10 @@ type ServiceManagerInterface interface {
 	RefreshStatuses()
 
 	GetServices() map[string]*Service
+
+	// Advanced features
+	StreamContainerLogs(containerName string, follow bool) (chan string, error)
+	GetAllHealthStatus() map[string]map[string]string
 }
 
 type ServiceStatus int

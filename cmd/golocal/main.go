@@ -758,6 +758,18 @@ func (a *App) createSidebar() {
 	portInfo := canvas.NewText(fmt.Sprintf("MySQL: %d | HTTP: %d", a.config.MySQLPort, a.config.HTTPPort), color.NRGBA{100, 100, 100, 255})
 	portInfo.TextSize = 10
 
+	// Add new buttons for Health Check and Logs
+	toolsLabel := canvas.NewText("TOOLS", color.NRGBA{100, 100, 100, 255})
+	toolsLabel.TextSize = 10
+
+	healthBtn := widget.NewButtonWithIcon("Health Check", theme.InfoIcon(), func() {
+		a.showHealthCheckDashboard()
+	})
+
+	logsBtn := widget.NewButtonWithIcon("Container Logs", theme.DocumentIcon(), func() {
+		a.showContainerLogsDialog()
+	})
+
 	a.sidebar = container.NewVBox(
 		container.NewPadded(container.NewVBox(title, subtitle)),
 		widget.NewSeparator(),
@@ -768,6 +780,10 @@ func (a *App) createSidebar() {
 		dockerUpBtn,
 		restartContainersBtn,
 		stopAllBtn,
+		widget.NewSeparator(),
+		toolsLabel,
+		healthBtn,
+		logsBtn,
 		widget.NewSeparator(),
 		portInfo,
 	)
@@ -1804,6 +1820,194 @@ func (a *App) loadProjectsOnStartup() {
 	} else {
 		a.updateStatus("No projects yet - create your first project!")
 	}
+}
+
+func (a *App) showHealthCheckDashboard() {
+	title := canvas.NewText("Health Check Dashboard", color.White)
+	title.TextSize = 24
+	title.TextStyle = fyne.TextStyle{Bold: true}
+
+	// Get detailed health status
+	healthStatus := a.serviceManager.GetAllHealthStatus()
+
+	var rows []fyne.CanvasObject
+
+	serviceNames := map[string]string{
+		"apache":     "Apache Web Server",
+		"mysql":      "MySQL Database",
+		"phpmyadmin": "phpMyAdmin",
+	}
+
+	for serviceKey, info := range healthStatus {
+		displayName := serviceNames[serviceKey]
+		if displayName == "" {
+			displayName = serviceKey
+		}
+
+		status := info["status"]
+		health := info["health"]
+
+		// Determine color based on status
+		var indicatorColor color.NRGBA
+		var statusText string
+
+		switch status {
+		case "running":
+			indicatorColor = color.NRGBA{100, 200, 100, 255} // Green
+			if health == "healthy" {
+				statusText = "✓ Ready"
+			} else if health == "unknown" {
+				statusText = "Running (no health check)"
+			} else {
+				statusText = fmt.Sprintf("Running (%s)", health)
+			}
+		case "stopped":
+			indicatorColor = color.NRGBA{200, 100, 100, 255} // Red
+			statusText = "✗ Stopped"
+		default:
+			indicatorColor = color.NRGBA{150, 150, 150, 255} // Gray
+			statusText = "Unknown"
+		}
+
+		indicator := canvas.NewCircle(indicatorColor)
+		indicator.Resize(fyne.NewSize(12, 12))
+
+		nameText := canvas.NewText(displayName, color.White)
+		nameText.TextSize = 14
+		nameText.TextStyle = fyne.TextStyle{Bold: true}
+
+		statusLabel := canvas.NewText(statusText, indicatorColor)
+		statusLabel.TextSize = 12
+
+		row := container.NewHBox(
+			indicator,
+			container.NewVBox(nameText, statusLabel),
+		)
+		rows = append(rows, row)
+	}
+
+	content := container.NewVBox(
+		title,
+		widget.NewSeparator(),
+	)
+	for _, row := range rows {
+		content.Add(row)
+	}
+
+	// Auto-refresh button
+	refreshBtn := widget.NewButton("Refresh", func() {
+		a.showHealthCheckDashboard()
+	})
+	content.Add(refreshBtn)
+
+	// Auto-start Docker button if Docker is not running
+	if !services.CheckDockerAvailable() {
+		dockerBtn := widget.NewButton("Start Docker Desktop", func() {
+			if err := services.EnsureDockerRunning(); err != nil {
+				a.showError("Docker Start", err)
+			} else {
+				dialog.ShowInformation("Docker", "Docker Desktop is starting... Please wait a moment and refresh.", a.mainWindow)
+			}
+		})
+		dockerBtn.Importance = widget.HighImportance
+		content.Add(widget.NewSeparator())
+		content.Add(canvas.NewText("Docker is not running", color.NRGBA{255, 100, 100, 255}))
+		content.Add(dockerBtn)
+	}
+
+	dlg := dialog.NewCustom("Health Check", "Close", content, a.mainWindow)
+	dlg.Resize(fyne.NewSize(400, 300))
+	dlg.Show()
+}
+
+func (a *App) showContainerLogsDialog() {
+	title := canvas.NewText("Container Logs", color.White)
+	title.TextSize = 24
+	title.TextStyle = fyne.TextStyle{Bold: true}
+
+	// Container selection
+	containers := []string{"apache", "mysql", "phpmyadmin"}
+	containerSelect := widget.NewSelect(containers, nil)
+	containerSelect.SetSelected("apache")
+
+	// Log display area
+	logEntry := widget.NewMultiLineEntry()
+	logEntry.SetPlaceHolder("Click 'View Logs' to see container output...")
+
+	// Channel to stop log streaming
+	var stopCh chan bool
+
+	// View logs button
+	viewBtn := widget.NewButton("View Logs", func() {
+		// Clear previous logs
+		logEntry.SetText("")
+
+		// Stop previous stream if exists
+		if stopCh != nil {
+			close(stopCh)
+		}
+		stopCh = make(chan bool)
+
+		selectedContainer := containerSelect.Selected
+
+		// Start streaming logs
+		go func() {
+			logChan, err := a.serviceManager.StreamContainerLogs(selectedContainer, false)
+			if err != nil {
+				logEntry.SetText(fmt.Sprintf("Error: %v", err))
+				return
+			}
+
+			var logs []string
+			for line := range logChan {
+				logs = append(logs, line)
+				// Keep only last 100 lines
+				if len(logs) > 100 {
+					logs = logs[1:]
+				}
+				logEntry.SetText(strings.Join(logs, "\n"))
+			}
+		}()
+	})
+
+	// Follow logs checkbox
+	followCheck := widget.NewCheck("Follow (real-time)", nil)
+
+	// Auto-refresh logs when follow is checked
+	go func() {
+		for {
+			time.Sleep(2 * time.Second)
+			if followCheck.Checked && stopCh != nil {
+				// Refresh logs in follow mode
+				selectedContainer := containerSelect.Selected
+				logChan, err := a.serviceManager.StreamContainerLogs(selectedContainer, true)
+				if err == nil {
+					var logs []string
+					for line := range logChan {
+						logs = append(logs, line)
+						if len(logs) > 100 {
+							logs = logs[1:]
+						}
+						logEntry.SetText(strings.Join(logs, "\n"))
+					}
+				}
+			}
+		}
+	}()
+
+	content := container.NewBorder(
+		container.NewVBox(
+			title,
+			widget.NewSeparator(),
+			container.NewHBox(widget.NewLabel("Container:"), containerSelect, viewBtn, followCheck),
+		),
+		nil, nil, nil,
+		container.NewScroll(logEntry),
+	)
+
+	dlg := dialog.NewCustom("Container Logs", "Close", content, a.mainWindow)
+	dlg.Resize(fyne.NewSize(700, 500))
+	dlg.Show()
 }
 
 func getIcon() []byte {
