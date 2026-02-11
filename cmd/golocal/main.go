@@ -1204,13 +1204,27 @@ func (a *App) createProjectCard(p *projects.Project) fyne.CanvasObject {
 		liveReloadSwitch.Disable()
 	}
 
+	actionsBtn := widget.NewButtonWithIcon("Actions", theme.MenuIcon(), func() {
+		content := container.NewGridWithColumns(2,
+			phpmyadminBtn,
+			openVSCodeBtn,
+			copyURLBtn,
+			copyDBBtn,
+			fixDBBtn,
+			deleteBtn,
+		)
+		d := dialog.NewCustom("Project Actions", "Close", container.NewPadded(content), a.mainWindow)
+		d.Resize(fyne.NewSize(520, 220))
+		d.Show()
+	})
+
 	return container.NewStack(
 		bg,
 		container.NewPadded(container.NewBorder(
 			container.NewVBox(title, urlText, phpText, dbText),
 			nil,
 			nil,
-			container.NewHBox(openBtn, phpmyadminBtn, openFolderBtn, openVSCodeBtn, copyURLBtn, copyDBBtn, liveReloadSwitch, fixDBBtn, editBtn, deleteBtn),
+			container.NewHBox(openBtn, openFolderBtn, liveReloadSwitch, editBtn, actionsBtn),
 		)),
 	)
 }
