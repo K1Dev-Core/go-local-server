@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"bufio"
 	"crypto/rand"
 	"encoding/hex"
@@ -26,7 +25,6 @@ import (
 
 	"go-local-server/internal/config"
 	"go-local-server/internal/dns"
-	"go-local-server/internal/livereload"
 	"go-local-server/internal/projects"
 	"go-local-server/internal/services"
 	"go-local-server/pkg/apache"
@@ -345,7 +343,6 @@ type App struct {
 	mainWindow     fyne.Window
 	serviceManager services.ServiceManagerInterface
 	projectManager *projects.Manager
-	liveReload     *livereload.Manager
 	dnsServer      *dns.Server
 	config         *config.AppConfig
 	usingDocker    bool
@@ -412,7 +409,6 @@ func main() {
 	// Docker-only mode
 	a.serviceManager = services.NewDockerServiceManager(cfg)
 	a.usingDocker = true
-	a.liveReload = livereload.NewManager(0)
 	fmt.Println("[DEBUG] App struct created")
 
 	// go a.setupTray()
@@ -428,7 +424,6 @@ func main() {
 	
 	// Load existing projects
 	a.loadProjectsOnStartup()
-	a.startLiveReloadForEnabledProjects()
 	a.showDashboard()
 	fmt.Println("[DEBUG] Dashboard shown")
 
@@ -587,11 +582,6 @@ func (a *App) shutdown() {
 	default:
 		close(a.stopRefreshCh)
 	}
-	if a.liveReload != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = a.liveReload.Stop(ctx)
-		cancel()
-	}
 
 	// Best-effort cleanup
 	if a.dnsServer != nil {
@@ -600,22 +590,6 @@ func (a *App) shutdown() {
 
 	if a.fyneApp != nil {
 		a.fyneApp.Quit()
-	}
-}
-
-func (a *App) startLiveReloadForEnabledProjects() {
-	if a.liveReload == nil {
-		return
-	}
-	projectList, err := a.projectManager.List()
-	if err != nil {
-		return
-	}
-	for _, p := range projectList {
-		if p != nil && p.LiveReloadEnabled {
-			_ = a.liveReload.Enable(p)
-			_ = a.liveReload.TryInjectScript(p)
-		}
 	}
 }
 
@@ -1213,14 +1187,6 @@ func (a *App) createProjectCard(p *projects.Project) fyne.CanvasObject {
 		fixDBBtn.Hide()
 	}
 
-	liveReloadSwitch := widget.NewCheck("Live Reload", func(enabled bool) {
-		a.setLiveReloadForProject(p, enabled)
-	})
-	liveReloadSwitch.SetChecked(p.LiveReloadEnabled)
-	if p.Path == "" {
-		liveReloadSwitch.Disable()
-	}
-
 	actionsBtn := widget.NewButtonWithIcon("Actions", theme.MenuIcon(), func() {
 		content := container.NewGridWithColumns(2,
 			phpmyadminBtn,
@@ -1241,50 +1207,9 @@ func (a *App) createProjectCard(p *projects.Project) fyne.CanvasObject {
 			container.NewVBox(title, urlText, phpText, dbText),
 			nil,
 			nil,
-			container.NewHBox(openBtn, openFolderBtn, liveReloadSwitch, editBtn, actionsBtn),
+			container.NewHBox(openBtn, openFolderBtn, editBtn, actionsBtn),
 		)),
 	)
-}
-
-func (a *App) toggleLiveReloadForProject(p *projects.Project) {
-	if p == nil {
-		return
-	}
-	a.setLiveReloadForProject(p, !p.LiveReloadEnabled)
-}
-
-func (a *App) setLiveReloadForProject(p *projects.Project, enabled bool) {
-	if p == nil {
-		return
-	}
-	if a.liveReload == nil {
-		a.showError("Live Reload", fmt.Errorf("live reload is not available"))
-		return
-	}
-	if p.LiveReloadEnabled == enabled {
-		return
-	}
-
-	p.LiveReloadEnabled = enabled
-	if err := a.projectManager.Update(p); err != nil {
-		a.showError("Live Reload", err)
-		return
-	}
-
-	if enabled {
-		if err := a.liveReload.Enable(p); err != nil {
-			a.showError("Live Reload", err)
-			return
-		}
-		_ = a.liveReload.TryInjectScript(p)
-		a.updateStatus(fmt.Sprintf("Live Reload enabled for '%s'", p.Name))
-	} else {
-		_ = a.liveReload.Disable(p.ID)
-		a.updateStatus(fmt.Sprintf("Live Reload disabled for '%s'", p.Name))
-	}
-
-	a.refreshProjectCards()
-	a.refreshProjectList()
 }
 
 func (a *App) fixProjectDatabase(p *projects.Project) {
@@ -1628,11 +1553,6 @@ func (a *App) showProjectDialog(existing *projects.Project, prefillName, prefill
 	// For imports we don't want to touch existing code by default
 	genTemplate.SetChecked(!isEdit && !isImport)
 
-	liveReloadCheck := widget.NewCheck("Enable Live Reload (auto refresh browser on save)", nil)
-	if isEdit {
-		liveReloadCheck.SetChecked(existing.LiveReloadEnabled)
-	}
-
 	if isEdit {
 		phpVersion.SetSelected(existing.PHPVersion)
 		if existing.Database.DBName != "" || existing.Database.DBUser != "" {
@@ -1713,8 +1633,6 @@ func (a *App) showProjectDialog(existing *projects.Project, prefillName, prefill
 		widget.NewSeparator(),
 		container.NewPadded(dbSection),
 		templateSection,
-		widget.NewSeparator(),
-		container.NewPadded(liveReloadCheck),
 	)
 
 	// Resize the form content for larger dialog
@@ -1795,14 +1713,12 @@ func (a *App) showProjectDialog(existing *projects.Project, prefillName, prefill
 			existing.PHPVersion = phpVersion.Selected
 			existing.Database = dbConfig
 			existing.DocumentRoot = strings.TrimSpace(docRootEntry.Text)
-			existing.LiveReloadEnabled = liveReloadCheck.Checked
 			err = a.projectManager.Update(existing)
 			p = existing
 		} else {
 			p, err = a.projectManager.CreateWithSubdomain(nameEntry.Text, subdomain, selectedPath, phpVersion.Selected, dbConfig)
 			if p != nil {
 				p.DocumentRoot = strings.TrimSpace(docRootEntry.Text)
-				p.LiveReloadEnabled = liveReloadCheck.Checked
 				a.projectManager.Update(p)
 			}
 		}
@@ -1842,13 +1758,6 @@ func (a *App) showProjectDialog(existing *projects.Project, prefillName, prefill
 		gen := apache.NewGenerator(a.config)
 		gen.GenerateVhost(p)
 		a.serviceManager.ReloadNginx()
-
-		if p.LiveReloadEnabled {
-			_ = a.liveReload.Enable(p)
-			_ = a.liveReload.TryInjectScript(p)
-		} else {
-			_ = a.liveReload.Disable(p.ID)
-		}
 
 		a.refreshProjectCards()
 		a.updateStatus(fmt.Sprintf("Saved '%s' at %s", p.Name, p.Domain))
