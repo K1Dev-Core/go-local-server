@@ -1196,15 +1196,12 @@ func (a *App) createProjectCard(p *projects.Project) fyne.CanvasObject {
 		fixDBBtn.Hide()
 	}
 
-	liveReloadBtnLabel := "Live Reload: OFF"
-	if p.LiveReloadEnabled {
-		liveReloadBtnLabel = "Live Reload: ON"
-	}
-	liveReloadBtn := widget.NewButtonWithIcon(liveReloadBtnLabel, theme.ViewRefreshIcon(), func() {
-		a.toggleLiveReloadForProject(p)
+	liveReloadSwitch := widget.NewCheck("Live Reload", func(enabled bool) {
+		a.setLiveReloadForProject(p, enabled)
 	})
+	liveReloadSwitch.SetChecked(p.LiveReloadEnabled)
 	if p.Path == "" {
-		liveReloadBtn.Disable()
+		liveReloadSwitch.Disable()
 	}
 
 	return container.NewStack(
@@ -1213,7 +1210,7 @@ func (a *App) createProjectCard(p *projects.Project) fyne.CanvasObject {
 			container.NewVBox(title, urlText, phpText, dbText),
 			nil,
 			nil,
-			container.NewHBox(openBtn, phpmyadminBtn, openFolderBtn, openVSCodeBtn, copyURLBtn, copyDBBtn, liveReloadBtn, fixDBBtn, editBtn, deleteBtn),
+			container.NewHBox(openBtn, phpmyadminBtn, openFolderBtn, openVSCodeBtn, copyURLBtn, copyDBBtn, liveReloadSwitch, fixDBBtn, editBtn, deleteBtn),
 		)),
 	)
 }
@@ -1222,19 +1219,28 @@ func (a *App) toggleLiveReloadForProject(p *projects.Project) {
 	if p == nil {
 		return
 	}
+	a.setLiveReloadForProject(p, !p.LiveReloadEnabled)
+}
+
+func (a *App) setLiveReloadForProject(p *projects.Project, enabled bool) {
+	if p == nil {
+		return
+	}
 	if a.liveReload == nil {
 		a.showError("Live Reload", fmt.Errorf("live reload is not available"))
 		return
 	}
+	if p.LiveReloadEnabled == enabled {
+		return
+	}
 
-	newVal := !p.LiveReloadEnabled
-	p.LiveReloadEnabled = newVal
+	p.LiveReloadEnabled = enabled
 	if err := a.projectManager.Update(p); err != nil {
 		a.showError("Live Reload", err)
 		return
 	}
 
-	if newVal {
+	if enabled {
 		if err := a.liveReload.Enable(p); err != nil {
 			a.showError("Live Reload", err)
 			return
